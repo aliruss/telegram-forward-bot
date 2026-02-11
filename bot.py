@@ -7,12 +7,14 @@ Features:
 - /echo <text>: repeats text
 - Re-sends any non-command message to a configured chat
 - Word filtering backed by SQLite database
+- Optional admin-managed signature appended to relayed messages
 
 Environment variables:
 - BOT_TOKEN: Telegram Bot API token (required)
 - FORWARD_CHAT_ID: Destination chat/channel ID for relayed messages (optional)
-- ADMIN_IDS: Comma-separated Telegram user IDs that can manage filter words (optional)
+- ADMIN_IDS: Comma-separated Telegram user IDs that can manage filter words/signature (optional)
 - FILTER_DB_PATH: SQLite database path (optional)
+- SIGNATURE_TEXT: Default signature appended to relayed messages (optional)
 """
 
 from __future__ import annotations
@@ -25,13 +27,7 @@ from pathlib import Path
 from typing import Final, Iterable
 
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -43,6 +39,7 @@ BOT_TOKEN_ENV: Final[str] = "BOT_TOKEN"
 FORWARD_CHAT_ID_ENV: Final[str] = "FORWARD_CHAT_ID"
 ADMIN_IDS_ENV: Final[str] = "ADMIN_IDS"
 FILTER_DB_PATH_ENV: Final[str] = "FILTER_DB_PATH"
+SIGNATURE_TEXT_ENV: Final[str] = "SIGNATURE_TEXT"
 DEFAULT_DB_NAME: Final[str] = "bot_filter.db"
 
 
@@ -50,7 +47,6 @@ def _candidate_env_files(filename: str = ".env") -> Iterable[Path]:
     """Return potential .env locations in lookup order."""
     cwd_env = Path.cwd() / filename
     script_env = Path(__file__).resolve().parent / filename
-
     if cwd_env == script_env:
         return (cwd_env,)
     return (cwd_env, script_env)
@@ -66,10 +62,8 @@ def load_local_env(filename: str = ".env") -> None:
             line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
-
             if line.startswith("export "):
                 line = line[len("export ") :].strip()
-
             if "=" not in line:
                 continue
 
@@ -149,11 +143,9 @@ def sanitize_text(text: str | None) -> str | None:
 
     cleaned = text
     for word in list_blocked_words():
-        if not word:
-            continue
-        cleaned = re.sub(re.escape(word), "", cleaned, flags=re.IGNORECASE)
+        if word:
+            cleaned = re.sub(re.escape(word), "", cleaned, flags=re.IGNORECASE)
 
-    # Collapse repeated horizontal whitespace but preserve line breaks.
     cleaned = re.sub(r"[^\S\r\n]{2,}", " ", cleaned)
     cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
     cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
@@ -181,9 +173,29 @@ def parse_admin_ids() -> set[int]:
 def is_admin(update: Update) -> bool:
     """Return whether user is configured as admin."""
     user = update.effective_user
-    if not user:
-        return False
-    return user.id in parse_admin_ids()
+    return bool(user and user.id in parse_admin_ids())
+
+
+def get_signature(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Get current relay signature."""
+    value = context.application.bot_data.get("signature", "")
+    return value if isinstance(value, str) else ""
+
+
+def set_signature(context: ContextTypes.DEFAULT_TYPE, signature: str) -> None:
+    """Set relay signature in memory."""
+    context.application.bot_data["signature"] = signature.strip()
+
+
+def append_signature(text: str | None, signature: str) -> str | None:
+    """Append signature to outgoing text/caption if configured."""
+    if not signature:
+        return text
+    if text is None:
+        return signature
+    if not text.strip():
+        return signature
+    return f"{text}\n{signature}"
 
 
 # Load local .env values when present so local runs work out-of-the-box.
@@ -195,8 +207,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if update.message:
         await update.message.reply_html(
-            f"Hi {user.mention_html()}! I am ready.\n"
-            "Use /help to see available commands."
+            f"Hi {user.mention_html()}! I am ready.\nUse /help to see available commands."
         )
 
 
@@ -210,7 +221,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "/echo <text> - Echo text back\n"
             "/addword <word> - Add blocked word (admin)\n"
             "/removeword <word> - Remove blocked word (admin)\n"
-            "/listwords - List blocked words (admin)\n\n"
+            "/listwords - List blocked words (admin)\n"
+            "/setsignature <text> - Set relay signature (admin)\n"
+            "/clearsignature - Clear relay signature (admin)\n"
+            "/showsignature - Show relay signature (admin)\n\n"
             "Any non-command message can be auto-relayed if FORWARD_CHAT_ID is set."
         )
 
@@ -219,7 +233,6 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /echo command."""
     if not update.message:
         return
-
     if context.args:
         await update.message.reply_text(" ".join(context.args))
     else:
@@ -273,9 +286,51 @@ async def list_words_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     words = list_blocked_words()
     if not words:
         await update.message.reply_text("Blocked words list is empty.")
+    else:
+        await update.message.reply_text("Blocked words:\n" + "\n".join(f"- {w}" for w in words))
+
+
+async def set_signature_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Set relay signature command for admins."""
+    if not update.message:
+        return
+    if not is_admin(update):
+        await update.message.reply_text("Not authorized.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /setsignature <text>")
         return
 
-    await update.message.reply_text("Blocked words:\n" + "\n".join(f"- {w}" for w in words))
+    signature = " ".join(context.args).strip()
+    set_signature(context, signature)
+    await update.message.reply_text(f"Signature set: {signature}")
+
+
+async def clear_signature_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear relay signature command for admins."""
+    if not update.message:
+        return
+    if not is_admin(update):
+        await update.message.reply_text("Not authorized.")
+        return
+
+    set_signature(context, "")
+    await update.message.reply_text("Signature cleared.")
+
+
+async def show_signature_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show relay signature command for admins."""
+    if not update.message:
+        return
+    if not is_admin(update):
+        await update.message.reply_text("Not authorized.")
+        return
+
+    signature = get_signature(context)
+    if signature:
+        await update.message.reply_text(f"Current signature: {signature}")
+    else:
+        await update.message.reply_text("Signature is not set.")
 
 
 async def relay_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -285,18 +340,18 @@ async def relay_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not target_chat_id or not message:
         return
 
-    safe_text = sanitize_text(message.text)
-    safe_caption = sanitize_text(message.caption)
+    signature = get_signature(context)
+    safe_text = append_signature(sanitize_text(message.text), signature)
+    safe_caption = append_signature(sanitize_text(message.caption), signature)
 
     try:
         if message.text is not None:
             if safe_text and safe_text.strip():
                 await context.bot.send_message(chat_id=target_chat_id, text=safe_text)
         elif message.photo:
-            largest = message.photo[-1]
             await context.bot.send_photo(
                 chat_id=target_chat_id,
-                photo=largest.file_id,
+                photo=message.photo[-1].file_id,
                 caption=safe_caption,
                 caption_entities=message.caption_entities if safe_caption else None,
             )
@@ -329,10 +384,7 @@ async def relay_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 caption_entities=message.caption_entities if safe_caption else None,
             )
         elif message.sticker:
-            await context.bot.send_sticker(
-                chat_id=target_chat_id,
-                sticker=message.sticker.file_id,
-            )
+            await context.bot.send_sticker(chat_id=target_chat_id, sticker=message.sticker.file_id)
         elif message.animation:
             await context.bot.send_animation(
                 chat_id=target_chat_id,
@@ -365,6 +417,7 @@ def build_application() -> Application:
 
     init_db()
     application = Application.builder().token(token).build()
+    application.bot_data["signature"] = os.getenv(SIGNATURE_TEXT_ENV, "").strip()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
@@ -372,6 +425,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("addword", add_word_command))
     application.add_handler(CommandHandler("removeword", remove_word_command))
     application.add_handler(CommandHandler("listwords", list_words_command))
+    application.add_handler(CommandHandler("setsignature", set_signature_command))
+    application.add_handler(CommandHandler("clearsignature", clear_signature_command))
+    application.add_handler(CommandHandler("showsignature", show_signature_command))
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, relay_message))
 
     application.add_error_handler(on_error)

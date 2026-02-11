@@ -10,13 +10,18 @@ A simple Telegram bot built with Python.
 - Optional auto-relay of all non-command messages to a target chat (re-sent, not forwarded)
 - SQLite-backed blocked words list
 - Admin-only commands to manage blocked words
+- Admin-only commands to set/clear/show relay signature
 - Text/caption sanitization before sending to destination
+- Optional signature appended to relayed message text/caption
 
 ## Admin Commands
 
 - `/addword <word>`: add a blocked word
 - `/removeword <word>`: remove a blocked word
 - `/listwords`: list current blocked words
+- `/setsignature <text>`: set signature appended to relayed messages
+- `/clearsignature`: remove signature
+- `/showsignature`: show current signature
 
 Only users listed in `ADMIN_IDS` can use these commands.
 
@@ -46,6 +51,7 @@ Only users listed in `ADMIN_IDS` can use these commands.
    - `FORWARD_CHAT_ID` (optional)
    - `ADMIN_IDS` (optional but required for admin management commands)
    - `FILTER_DB_PATH` (optional)
+   - `SIGNATURE_TEXT` (optional)
 
    The bot reads `.env` automatically from either the current working directory or bot script directory.
 
@@ -61,9 +67,10 @@ When a non-command message arrives, the bot:
 
 1. Loads blocked words from SQLite database.
 2. Removes blocked words from text/caption (case-insensitive).
-3. Sends the sanitized result to destination chat.
+3. Appends signature (if configured).
+4. Sends the sanitized result to destination chat.
 
-If message text becomes empty after sanitization, nothing is sent for plain text messages.
+If message text becomes empty after sanitization, only signature is sent when configured; otherwise nothing is sent for plain text messages.
 
 ## Notes
 
