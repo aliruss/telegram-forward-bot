@@ -34,6 +34,7 @@ A simple Telegram bot built with Python.
    - `BOT_TOKEN` (required)
    - `FORWARD_CHAT_ID` (optional)
 
+   The bot reads `.env` automatically (no extra package required), from either the current working directory or the bot script directory.
 
 4. Run the bot:
 
