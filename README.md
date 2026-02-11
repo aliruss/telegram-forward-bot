@@ -8,6 +8,17 @@ A simple Telegram bot built with Python.
 - `/help` usage command
 - `/echo <text>` command
 - Optional auto-relay of all non-command messages to a target chat (re-sent, not forwarded)
+- SQLite-backed blocked words list
+- Admin-only commands to manage blocked words
+- Text/caption sanitization before sending to destination
+
+## Admin Commands
+
+- `/addword <word>`: add a blocked word
+- `/removeword <word>`: remove a blocked word
+- `/listwords`: list current blocked words
+
+Only users listed in `ADMIN_IDS` can use these commands.
 
 ## Setup
 
@@ -33,14 +44,26 @@ A simple Telegram bot built with Python.
    Set:
    - `BOT_TOKEN` (required)
    - `FORWARD_CHAT_ID` (optional)
+   - `ADMIN_IDS` (optional but required for admin management commands)
+   - `FILTER_DB_PATH` (optional)
 
-   The bot reads `.env` automatically (no extra package required), from either the current working directory or the bot script directory.
+   The bot reads `.env` automatically from either the current working directory or bot script directory.
 
 4. Run the bot:
 
    ```bash
    python bot.py
    ```
+
+## Word Filtering Behavior
+
+When a non-command message arrives, the bot:
+
+1. Loads blocked words from SQLite database.
+2. Removes blocked words from text/caption (case-insensitive).
+3. Sends the sanitized result to destination chat.
+
+If message text becomes empty after sanitization, nothing is sent for plain text messages.
 
 ## Notes
 
