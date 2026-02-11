@@ -143,7 +143,7 @@ def list_blocked_words() -> list[str]:
 
 
 def sanitize_text(text: str | None) -> str | None:
-    """Remove blocked words from message content."""
+    """Remove blocked words from message content while preserving line breaks."""
     if text is None:
         return None
 
@@ -153,7 +153,10 @@ def sanitize_text(text: str | None) -> str | None:
             continue
         cleaned = re.sub(re.escape(word), "", cleaned, flags=re.IGNORECASE)
 
-    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    # Collapse repeated horizontal whitespace but preserve line breaks.
+    cleaned = re.sub(r"[^\S\r\n]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
     return cleaned
 
 
@@ -287,7 +290,7 @@ async def relay_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         if message.text is not None:
-            if safe_text:
+            if safe_text and safe_text.strip():
                 await context.bot.send_message(chat_id=target_chat_id, text=safe_text)
         elif message.photo:
             largest = message.photo[-1]
