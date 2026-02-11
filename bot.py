@@ -38,59 +38,28 @@ BOT_TOKEN_ENV: Final[str] = "BOT_TOKEN"
 FORWARD_CHAT_ID_ENV: Final[str] = "FORWARD_CHAT_ID"
 
 
-def load_local_env(filename: str = ".env") -> None:
-    """Load simple KEY=VALUE pairs from a local .env file if it exists.
-
-    This avoids requiring extra dependencies and keeps local setup simple.
-    Existing environment values are preserved.
-    """
-    env_file = Path(filename)
-    if not env_file.exists():
-        return
-
-    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            os.environ.setdefault(key, value)
-
-
-# Load local .env values when present so local runs work out-of-the-box.
-load_local_env()
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
     user = update.effective_user
-    if update.message:
-        await update.message.reply_html(
-            f"Hi {user.mention_html()}! I am ready.\n"
-            "Use /help to see available commands."
-        )
+    await update.message.reply_html(
+        f"Hi {user.mention_html()}! I am ready.\n"
+        "Use /help to see available commands."
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /help command."""
-    if update.message:
-        await update.message.reply_text(
-            "Available commands:\n"
-            "/start - Start the bot\n"
-            "/help - Show this message\n"
-            "/echo <text> - Echo text back\n\n"
-            "Any non-command message can be auto-forwarded if FORWARD_CHAT_ID is set."
-        )
+    await update.message.reply_text(
+        "Available commands:\n"
+        "/start - Start the bot\n"
+        "/help - Show this message\n"
+        "/echo <text> - Echo text back\n\n"
+        "Any non-command message can be auto-forwarded if FORWARD_CHAT_ID is set."
+    )
 
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /echo command."""
-    if not update.message:
-        return
-
     if context.args:
         await update.message.reply_text(" ".join(context.args))
     else:
@@ -100,7 +69,10 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Forward non-command messages to a target chat if configured."""
     forward_chat_id = os.getenv(FORWARD_CHAT_ID_ENV)
-    if not forward_chat_id or not update.message:
+    if not forward_chat_id:
+        return
+
+    if not update.message:
         return
 
     try:
@@ -122,17 +94,16 @@ def build_application() -> Application:
     """Create and configure Telegram application."""
     token = os.getenv(BOT_TOKEN_ENV)
     if not token:
-        raise RuntimeError(
-            f"Missing required environment variable: {BOT_TOKEN_ENV}. "
-            "Set it in your environment or in a local .env file."
-        )
+        raise RuntimeError(f"Missing required environment variable: {BOT_TOKEN_ENV}")
 
     application = Application.builder().token(token).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("echo", echo))
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, forward_message))
+    application.add_handler(
+        MessageHandler(filters.ALL & ~filters.COMMAND, forward_message)
+    )
 
     application.add_error_handler(on_error)
     return application
