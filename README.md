@@ -7,7 +7,7 @@ A simple Telegram bot built with Python.
 - `/start` welcome command
 - `/help` usage command
 - `/echo <text>` command
-- Optional auto-forwarding of all non-command messages to a target chat
+- Optional auto-relay of all non-command messages to a target chat (re-sent, not forwarded)
 
 ## Setup
 

@@ -5,7 +5,7 @@ Features:
 - /start: welcome message
 - /help: usage instructions
 - /echo <text>: repeats text
-- Forwards any non-command message to a configured chat
+- Re-sends any non-command message to a configured chat
 
 Environment variables:
 - BOT_TOKEN: Telegram Bot API token (required)
@@ -103,7 +103,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "/start - Start the bot\n"
             "/help - Show this message\n"
             "/echo <text> - Echo text back\n\n"
-            "Any non-command message can be auto-forwarded if FORWARD_CHAT_ID is set."
+            "Any non-command message can be auto-relayed if FORWARD_CHAT_ID is set."
         )
 
 
@@ -118,20 +118,71 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /echo <text>")
 
 
-async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Forward non-command messages to a target chat if configured."""
-    forward_chat_id = os.getenv(FORWARD_CHAT_ID_ENV)
-    if not forward_chat_id or not update.message:
+async def relay_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Re-send non-command messages to a target chat if configured."""
+    target_chat_id = os.getenv(FORWARD_CHAT_ID_ENV)
+    message = update.message
+    if not target_chat_id or not message:
         return
 
     try:
-        await context.bot.forward_message(
-            chat_id=forward_chat_id,
-            from_chat_id=update.message.chat_id,
-            message_id=update.message.message_id,
-        )
+        if message.text:
+            await context.bot.send_message(chat_id=target_chat_id, text=message.text)
+        elif message.photo:
+            largest = message.photo[-1]
+            await context.bot.send_photo(
+                chat_id=target_chat_id,
+                photo=largest.file_id,
+                caption=message.caption,
+                caption_entities=message.caption_entities,
+            )
+        elif message.video:
+            await context.bot.send_video(
+                chat_id=target_chat_id,
+                video=message.video.file_id,
+                caption=message.caption,
+                caption_entities=message.caption_entities,
+            )
+        elif message.document:
+            await context.bot.send_document(
+                chat_id=target_chat_id,
+                document=message.document.file_id,
+                caption=message.caption,
+                caption_entities=message.caption_entities,
+            )
+        elif message.audio:
+            await context.bot.send_audio(
+                chat_id=target_chat_id,
+                audio=message.audio.file_id,
+                caption=message.caption,
+                caption_entities=message.caption_entities,
+            )
+        elif message.voice:
+            await context.bot.send_voice(
+                chat_id=target_chat_id,
+                voice=message.voice.file_id,
+                caption=message.caption,
+                caption_entities=message.caption_entities,
+            )
+        elif message.sticker:
+            await context.bot.send_sticker(
+                chat_id=target_chat_id,
+                sticker=message.sticker.file_id,
+            )
+        elif message.animation:
+            await context.bot.send_animation(
+                chat_id=target_chat_id,
+                animation=message.animation.file_id,
+                caption=message.caption,
+                caption_entities=message.caption_entities,
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=target_chat_id,
+                text="[Unsupported message type received]",
+            )
     except Exception:
-        logger.exception("Failed to forward message")
+        logger.exception("Failed to relay message")
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -153,7 +204,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("echo", echo))
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, forward_message))
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, relay_message))
 
     application.add_error_handler(on_error)
     return application
